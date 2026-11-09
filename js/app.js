@@ -23,7 +23,8 @@ const els = {
 };
 
 // ---------- package dropdowns ----------
-function fillPackageSelect(sel) {
+function createPackageSelect() {
+  const sel = document.createElement('select');
   const custom = document.createElement('option');
   custom.value = CUSTOM_ID;
   custom.textContent = 'Custom';
@@ -38,6 +39,7 @@ function fillPackageSelect(sel) {
     }
     sel.appendChild(og);
   }
+  return sel;
 }
 
 function selectPackage(sel, id, dims) {
@@ -53,9 +55,8 @@ function addPartEntry(item = {}) {
   head.className = 'package-entry-head';
   const packageLabel = document.createElement('label');
   packageLabel.textContent = 'Package';
-  const pkg = document.createElement('select');
+  const pkg = createPackageSelect();
   pkg.className = 'pkg-select';
-  fillPackageSelect(pkg);
   packageLabel.appendChild(pkg);
 
   const quantityLabel = document.createElement('label');
