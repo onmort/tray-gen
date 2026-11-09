@@ -15,11 +15,9 @@ document.getElementById('loading').remove();
 const $ = (id) => document.getElementById(id);
 const els = {
   screw: $('screw'),
-  pkg: $('pkg'), px: $('px'), py: $('py'), pz: $('pz'),
-  clearance: $('clearance'), cols: $('cols'), rows: $('rows'),
+  partsList: $('partsList'), addPart: $('addPart'),
+  clearance: $('clearance'),
   span: $('span'), spanLabel: $('spanLabel'), sizeLabel: $('sizeLabel'),
-  twoParts: $('twoParts'), partBWrap: $('partBWrap'), split: $('split'), splitLabel: $('splitLabel'),
-  pkgB: $('pkgB'), pxB: $('pxB'), pyB: $('pyB'), pzB: $('pzB'), colsB: $('colsB'), rowsB: $('rowsB'),
   hud: $('hud'),
   dlStl: $('dlStl'), dlStep: $('dlStep'),
 };
@@ -41,16 +39,72 @@ function fillPackageSelect(sel) {
     sel.appendChild(og);
   }
 }
-fillPackageSelect(els.pkg);
-fillPackageSelect(els.pkgB);
 
 function selectPackage(sel, id, dims) {
   sel.value = id;
   const p = findPackage(id);
   if (p) { dims.x.value = p.x; dims.y.value = p.y; dims.z.value = p.z; }
 }
-const dimsA = { x: els.px, y: els.py, z: els.pz };
-const dimsB = { x: els.pxB, y: els.pyB, z: els.pzB };
+function addPartEntry(item = {}) {
+  const entry = document.createElement('div');
+  entry.className = 'package-entry';
+
+  const head = document.createElement('div');
+  head.className = 'package-entry-head';
+  const packageLabel = document.createElement('label');
+  packageLabel.textContent = 'Package';
+  const pkg = document.createElement('select');
+  pkg.className = 'pkg-select';
+  fillPackageSelect(pkg);
+  packageLabel.appendChild(pkg);
+
+  const quantityLabel = document.createElement('label');
+  quantityLabel.textContent = 'Count';
+  const quantity = document.createElement('input');
+  quantity.className = 'quantity';
+  quantity.type = 'number';
+  quantity.min = '1';
+  quantity.step = '1';
+  quantity.value = String(item.quantity ?? 1);
+  quantityLabel.appendChild(quantity);
+
+  const remove = document.createElement('button');
+  remove.className = 'remove-part';
+  remove.type = 'button';
+  remove.textContent = '×';
+  remove.title = 'Remove package type';
+  remove.setAttribute('aria-label', 'Remove package type');
+  head.append(packageLabel, quantityLabel, remove);
+  entry.appendChild(head);
+
+  const dimensions = document.createElement('div');
+  dimensions.className = 'row';
+  for (const axis of ['x', 'y', 'z']) {
+    const wrap = document.createElement('div');
+    const label = document.createElement('label');
+    label.textContent = `${axis.toUpperCase()} (mm)`;
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.step = '0.01';
+    input.min = '0.1';
+    input.max = axis === 'x' ? '160' : axis === 'y' ? '110' : '8.5';
+    input.className = `dim-${axis}`;
+    input.value = String(item[axis] ?? '');
+    label.appendChild(input);
+    wrap.appendChild(label);
+    dimensions.appendChild(wrap);
+  }
+  entry.appendChild(dimensions);
+  els.partsList.appendChild(entry);
+  if (item.pkg) pkg.value = item.pkg;
+  syncRemoveButtons();
+  return entry;
+}
+function syncRemoveButtons() {
+  const entries = [...els.partsList.children];
+  for (const entry of entries) entry.querySelector('.remove-part').disabled = entries.length === 1;
+}
+addPartEntry({ x: 5, y: 5, z: 1, quantity: 1 });
 
 // ---------- URL hash state ----------
 function applyHash() {
@@ -58,55 +112,67 @@ function applyHash() {
   try {
     const q = new URLSearchParams(location.hash.slice(1));
     if (q.get('s') === 'M3' || q.get('s') === 'M4') els.screw.value = q.get('s');
-    if (q.get('pkg')) els.pkg.value = q.get('pkg');
-    if (q.get('x')) els.px.value = q.get('x');
-    if (q.get('y')) els.py.value = q.get('y');
-    if (q.get('z')) els.pz.value = q.get('z');
     if (q.get('c')) els.clearance.value = q.get('c');
-    if (q.get('cols')) els.cols.value = q.get('cols');
-    if (q.get('rows')) els.rows.value = q.get('rows');
     if (q.get('span')) els.span.value = q.get('span');
     else if (q.get('hw') === '1') els.span.value = '4';
-    if (q.get('t') === '1') els.twoParts.checked = true;
-    if (q.get('split')) els.split.value = q.get('split');
-    if (q.get('pkgB')) els.pkgB.value = q.get('pkgB');
-    if (q.get('xb')) els.pxB.value = q.get('xb');
-    if (q.get('yb')) els.pyB.value = q.get('yb');
-    if (q.get('zb')) els.pzB.value = q.get('zb');
-    if (q.get('colsB')) els.colsB.value = q.get('colsB');
-    if (q.get('rowsB')) els.rowsB.value = q.get('rowsB');
+    let items = [];
+    if (q.get('items')) {
+      const parsed = JSON.parse(q.get('items'));
+      if (Array.isArray(parsed)) items = parsed.filter(item => item && typeof item === 'object' && !Array.isArray(item));
+    } else if (q.get('pkg') || q.get('x')) {
+      items.push({
+        pkg: q.get('pkg') || CUSTOM_ID, x: q.get('x') || 5, y: q.get('y') || 5, z: q.get('z') || 1,
+        quantity: (Number(q.get('cols')) || 1) * (Number(q.get('rows')) || 1),
+      });
+      if (q.get('t') === '1') items.push({
+        pkg: q.get('pkgB') || CUSTOM_ID, x: q.get('xb') || 5, y: q.get('yb') || 5, z: q.get('zb') || 1,
+        quantity: (Number(q.get('colsB')) || 1) * (Number(q.get('rowsB')) || 1),
+      });
+    }
+    if (items.length) {
+      els.partsList.replaceChildren();
+      for (const item of items) addPartEntry(item);
+    }
   } catch { /* ignore malformed hash */ }
 }
 function writeHash() {
+  const items = [...els.partsList.children].map((entry) => {
+    const pkg = entry.querySelector('.pkg-select').value;
+    return {
+      pkg,
+      x: entry.querySelector('.dim-x').value,
+      y: entry.querySelector('.dim-y').value,
+      z: entry.querySelector('.dim-z').value,
+      quantity: entry.querySelector('.quantity').value,
+    };
+  });
   const q = new URLSearchParams({
     s: els.screw.value,
-    pkg: els.pkg.value, x: els.px.value, y: els.py.value, z: els.pz.value,
-    c: els.clearance.value, cols: els.cols.value, rows: els.rows.value,
+    c: els.clearance.value,
     span: els.span.value,
-    t: els.twoParts.checked ? '1' : '0', split: els.split.value,
-    pkgB: els.pkgB.value, xb: els.pxB.value, yb: els.pyB.value, zb: els.pzB.value,
-    colsB: els.colsB.value, rowsB: els.rowsB.value,
+    items: JSON.stringify(items),
   });
   history.replaceState(null, '', '#' + q.toString());
 }
 
 // ---------- input ----------
-function pkgName(sel) { const p = findPackage(sel.value); return p ? p.name : 'Custom'; }
 function readInput() {
   const inp = {
     screw: els.screw.value,
     clearance: els.clearance.value === '' ? undefined : +els.clearance.value,
-    part: { name: pkgName(els.pkg), x: +els.px.value, y: +els.py.value, z: +els.pz.value },
-    cols: els.cols.value === '' ? null : +els.cols.value,
-    rows: els.rows.value === '' ? null : +els.rows.value,
+    parts: [...els.partsList.children].map((entry) => {
+      const pkg = entry.querySelector('.pkg-select').value;
+      const p = findPackage(pkg);
+      return {
+        name: p ? p.name : 'Custom',
+        x: +entry.querySelector('.dim-x').value,
+        y: +entry.querySelector('.dim-y').value,
+        z: +entry.querySelector('.dim-z').value,
+        quantity: +entry.querySelector('.quantity').value,
+      };
+    }),
     span: +els.span.value,
   };
-  if (els.twoParts.checked) {
-    inp.partB = { name: pkgName(els.pkgB), x: +els.pxB.value, y: +els.pyB.value, z: +els.pzB.value };
-    inp.split = +els.split.value / 100;
-    inp.colsB = els.colsB.value === '' ? null : +els.colsB.value;
-    inp.rowsB = els.rowsB.value === '' ? null : +els.rowsB.value;
-  }
   return inp;
 }
 
@@ -145,31 +211,32 @@ function updateEdges() {
   scene.add(edgeLines);
 }
 
-// Ghost parts, always shown. A = slate, B = bronze.
-const ghostMat = new THREE.MeshStandardMaterial({ color: 0x465361, transparent: true, opacity: 0.55, depthWrite: false });
-const ghostMatB = new THREE.MeshStandardMaterial({ color: 0x8a6d3b, transparent: true, opacity: 0.55, depthWrite: false });
+// Ghost components are color-coded by package entry.
+const ghostMats = [0x465361, 0x8a6d3b, 0x587a62, 0x77618a, 0x9a654f, 0x4f7d88]
+  .map(color => new THREE.MeshStandardMaterial({ color, transparent: true, opacity: 0.55, depthWrite: false }));
 const unitBox = new THREE.BoxGeometry(1, 1, 1);
-let ghostA = null, ghostB = null;
+let ghostParts = [];
 function updateGhostParts(plan) {
-  for (const m of [ghostA, ghostB]) if (m) { scene.remove(m); m.dispose(); }
-  ghostA = ghostB = null;
-  const build = (key, mat) => {
-    const ps = plan.pockets.filter(p => p.part === key);
+  for (const m of ghostParts) { scene.remove(m); m.dispose(); }
+  ghostParts = [];
+  const build = (index, part) => {
+    const ps = plan.pockets.filter(p => p.part === index);
     if (!ps.length) return null;
-    const dims = key === 'A' ? plan.parts.A.part : plan.parts.B.part;
-    const m = new THREE.InstancedMesh(unitBox, mat, ps.length);
+    const m = new THREE.InstancedMesh(unitBox, ghostMats[index % ghostMats.length], ps.length);
     const m4 = new THREE.Matrix4();
     ps.forEach((p, i) => {
-      m4.makeScale(dims.x, dims.y, dims.z);
-      m4.setPosition(p.cx, p.cy, p.floorZ + dims.z / 2);
+      m4.makeScale(part.x, part.y, part.z);
+      m4.setPosition(p.cx, p.cy, p.floorZ + part.z / 2);
       m.setMatrixAt(i, m4);
     });
     m.instanceMatrix.needsUpdate = true;
     scene.add(m);
     return m;
   };
-  ghostA = build('A', ghostMat);
-  if (plan.twoParts) ghostB = build('B', ghostMatB);
+  for (const [index, item] of plan.parts.entries()) {
+    const mesh = build(index, item.part);
+    if (mesh) ghostParts.push(mesh);
+  }
 }
 
 // Plate lattice, always shown
@@ -321,13 +388,33 @@ function scheduleRebuild() {
 }
 
 // ---------- events ----------
-els.pkg.addEventListener('change', () => { selectPackage(els.pkg, els.pkg.value, dimsA); scheduleRebuild(); });
-els.pkgB.addEventListener('change', () => { selectPackage(els.pkgB, els.pkgB.value, dimsB); scheduleRebuild(); });
-for (const e of [dimsA.x, dimsA.y, dimsA.z, dimsB.x, dimsB.y, dimsB.z]) {
-  e.addEventListener('input', scheduleRebuild);
-  e.addEventListener('change', scheduleRebuild);
-}
-function syncTwoParts() { els.partBWrap.hidden = !els.twoParts.checked; }
+els.partsList.addEventListener('change', (event) => {
+  const target = event.target;
+  const entry = target.closest('.package-entry');
+  if (target.classList.contains('pkg-select')) {
+    selectPackage(target, target.value, {
+      x: entry.querySelector('.dim-x'),
+      y: entry.querySelector('.dim-y'),
+      z: entry.querySelector('.dim-z'),
+    });
+  }
+  if (target.classList.contains('remove-part')) {
+    entry.remove();
+    syncRemoveButtons();
+  }
+  scheduleRebuild();
+});
+els.partsList.addEventListener('input', scheduleRebuild);
+els.partsList.addEventListener('click', (event) => {
+  if (!event.target.classList.contains('remove-part')) return;
+  event.target.closest('.package-entry').remove();
+  syncRemoveButtons();
+  scheduleRebuild();
+});
+els.addPart.addEventListener('click', () => {
+  addPartEntry({ x: 5, y: 5, z: 1, quantity: 1 });
+  scheduleRebuild();
+});
 function syncSpan() {
   const n = Math.min(MAX_SPAN, Math.max(MIN_SPAN, Math.round(+els.span.value || MAX_SPAN)));
   els.span.value = String(n);
@@ -335,14 +422,8 @@ function syncSpan() {
   els.spanLabel.textContent = n === 1 ? '1 column' : `${n} columns`;
   els.sizeLabel.textContent = size.label + ' tray for the staging plate.';
 }
-function syncSplitLabel() {
-  const v = +els.split.value;
-  els.splitLabel.textContent = `A ${v}% / B ${100 - v}%`;
-}
 els.span.addEventListener('input', () => { syncSpan(); scheduleRebuild(); });
-els.twoParts.addEventListener('change', () => { syncTwoParts(); scheduleRebuild(); });
-els.split.addEventListener('input', () => { syncSplitLabel(); scheduleRebuild(); });
-for (const e of [els.screw, els.clearance, els.cols, els.rows, els.colsB, els.rowsB]) {
+for (const e of [els.screw, els.clearance]) {
   e.addEventListener('input', scheduleRebuild);
   e.addEventListener('change', scheduleRebuild);
 }
@@ -350,12 +431,9 @@ for (const e of [els.screw, els.clearance, els.cols, els.rows, els.colsB, els.ro
 // ---------- downloads ----------
 function safeName(s) { return String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, ''); }
 function fileBase() {
-  const p = current.plan, pt = p.input.part;
-  let base = `lumen-tray_${safeName(pt.name)}_${pt.x}x${pt.y}x${pt.z}mm_${p.input.screw}`;
-  if (p.twoParts) {
-    const ptB = p.input.partB;
-    base += `+${safeName(ptB.name)}`;
-  }
+  const p = current.plan;
+  const packageNames = p.input.parts.map(item => `${item.quantity}x-${safeName(item.name)}`).join('_');
+  let base = `lumen-tray_${packageNames}_${p.input.screw}`;
   if (p.input.span < MAX_SPAN) base += `_${p.input.span}col`;
   return base;
 }
@@ -378,17 +456,8 @@ els.dlStep.addEventListener('click', () => {
 
 // ---------- boot ----------
 applyHash();
-if (els.px.value === '') {
-  els.pkg.value = CUSTOM_ID;
-  els.px.value = 5; els.py.value = 5; els.pz.value = 1;
-}
-if (els.pxB.value === '') {
-  els.pkgB.value = CUSTOM_ID;
-  els.pxB.value = 5; els.pyB.value = 5; els.pzB.value = 1;
-}
 if (els.clearance.value === '') els.clearance.value = 0.3;
 syncSpan();
-syncTwoParts();
-syncSplitLabel();
+syncRemoveButtons();
 resize();
 rebuild();

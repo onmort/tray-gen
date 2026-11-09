@@ -32,9 +32,11 @@
   select:focus,input:focus { outline:none; border-color:var(--accent); }
   input[type=range] { width:100%; accent-color:var(--accent); margin-top:6px; }
   .row { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; }
-  .row2 { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
-  .check { display:flex; align-items:center; gap:8px; margin-top:12px; font-size:13px; color:var(--text); }
-  .check input { accent-color:var(--accent); width:15px; height:15px; }
+  .package-entry { margin:10px 0 14px; padding:10px; border:1px solid var(--border); border-radius:10px; }
+  .package-entry-head { display:grid; grid-template-columns:minmax(0,1fr) 76px 34px; gap:6px; align-items:end; }
+  .package-entry-head label, .package-entry .row label { margin-top:0; }
+  .package-entry .row { margin-top:8px; }
+  button.remove-part { width:34px; height:34px; margin:0; padding:0; font-size:18px; }
   button { width:100%; margin-top:8px; padding:10px; border-radius:10px; border:1px solid var(--border); background:#fbfaf7; color:var(--text); font-size:13px; font-family:inherit; font-weight:500; cursor:pointer; }
   button:hover:not(:disabled) { border-color:var(--accent); }
   button.primary { background:var(--accent); color:#000; border-color:transparent; font-weight:700; }
@@ -42,7 +44,6 @@
   button:disabled { opacity:.4; cursor:not-allowed; }
   .hint { font-size:11px; color:var(--dim); margin-top:6px; }
   #hud { position:absolute; left:14px; bottom:12px; font-size:12px; color:#000; pointer-events:none; }
-  #logo { position:absolute; top:14px; right:16px; width:118px; opacity:.85; pointer-events:none; user-select:none; }
   #loading { position:absolute; inset:0; display:grid; place-items:center; color:var(--dim); font-size:13px; background:var(--bg); }
 </style>
 <script type="importmap">
@@ -67,40 +68,12 @@
     <option value="M3">M3 socket head</option>
   </select>
 
-  <div class="sec">Package</div>
-  <label for="pkg">Part A</label>
-  <select id="pkg"></select>
-  <div class="row">
-    <div><label for="px">X (mm)</label><input id="px" type="number" step="0.01" min="0.1" max="160"></div>
-    <div><label for="py">Y (mm)</label><input id="py" type="number" step="0.01" min="0.1" max="110"></div>
-    <div><label for="pz">Z (mm)</label><input id="pz" type="number" step="0.01" min="0.1" max="8.5"></div>
-  </div>
-  <div class="row">
-    <div><label for="clearance">Clearance (mm)</label><input id="clearance" type="number" step="0.05" min="0" max="1.5"></div>
-    <div><label for="cols">Max cols</label><input id="cols" type="number" step="1" min="1" placeholder="auto"></div>
-    <div><label for="rows">Max rows</label><input id="rows" type="number" step="1" min="1" placeholder="auto"></div>
-  </div>
+  <div class="sec">Packages</div>
+  <div id="partsList"></div>
+  <button id="addPart" type="button">Add package type</button>
+  <label for="clearance">Clearance (mm)</label>
+  <input id="clearance" type="number" step="0.05" min="0" max="1.5">
   <div class="hint">Dimensions should be full enclosing dimensions of component, including leads.</div>
-  <label class="check"><input type="checkbox" id="twoParts"> Two package types</label>
-
-  <div id="partBWrap" hidden>
-    <div class="sec">Second package</div>
-    <label for="pkgB">Part B</label>
-    <select id="pkgB"></select>
-    <div class="row">
-      <div><label for="pxB">X (mm)</label><input id="pxB" type="number" step="0.01" min="0.1" max="160"></div>
-      <div><label for="pyB">Y (mm)</label><input id="pyB" type="number" step="0.01" min="0.1" max="110"></div>
-      <div><label for="pzB">Z (mm)</label><input id="pzB" type="number" step="0.01" min="0.1" max="8.5"></div>
-    </div>
-    <div class="row2">
-      <div><label for="colsB">Max cols</label><input id="colsB" type="number" step="1" min="1" placeholder="auto"></div>
-      <div><label for="rowsB">Max rows</label><input id="rowsB" type="number" step="1" min="1" placeholder="auto"></div>
-    </div>
-
-    <div class="sec">Space split</div>
-    <label for="split"><span id="splitLabel">A 50% / B 50%</span></label>
-    <input id="split" type="range" min="15" max="85" step="1" value="50">
-  </div>
 
   <div class="sec">Export</div>
   <button class="primary" id="dlStl" disabled>Download STL</button>
@@ -109,7 +82,6 @@
 <div id="divider" title="Drag to resize"></div>
 <main>
   <canvas id="view"></canvas>
-  <img id="logo" src="./assets/opulo-logo.png" alt="Opulo">
   <div id="hud"></div>
   <div id="loading">Loading geometry engine…</div>
 </main>

@@ -52,6 +52,137 @@ export function holeParityOk([x, y]) {
       && ((i + j) % 2 === 0);
 }
 
+function computeMultiPartPlan(raw) {
+  const errors = [], warnings = [];
+  const screwKey = raw.screw === 'M3' ? 'M3' : 'M4';
+  const screw = { ...SCREWS[screwKey], key: screwKey };
+  const clearance = num(raw.clearance, DEFAULTS.clearance);
+  const wall = WALL;
+  const span = Math.min(MAX_SPAN, Math.max(MIN_SPAN, Math.round(num(raw.span, MAX_SPAN))));
+  const items = raw.parts.map(item => ({
+    part: {
+      name: (item && item.name) || 'custom',
+      x: num(item && item.x, 0), y: num(item && item.y, 0), z: num(item && item.z, 0),
+    },
+    quantity: Number(item && item.quantity),
+  }));
+  const input = { screw: screwKey, clearance, wall, parts: items, span };
+  if (!items.length) errors.push('Add at least one package type.');
+  if (clearance < LIMITS.clearance.min || clearance > LIMITS.clearance.max) {
+    errors.push(`Clearance must be ${LIMITS.clearance.min} to ${LIMITS.clearance.max} mm per side.`);
+  }
+  for (const { part, quantity } of items) {
+    if (!(part.x > 0) || !(part.y > 0)) errors.push(`Part ${part.name} X and Y must be > 0 mm.`);
+    if (!(part.z > 0)) errors.push(`Part ${part.name} Z (height) must be > 0 mm.`);
+    if (part.z > MAX_PART_Z) errors.push(`Part ${part.name} height ${part.z} mm exceeds ${MAX_PART_Z} mm (needs ${MIN_FLOOR} mm floor under a 10 mm vision plane).`);
+    if (!Number.isSafeInteger(quantity) || quantity < 1) errors.push(`Part ${part.name} count must be a positive whole number.`);
+  }
+
+  const outline = spanOutline(span);
+  const innerW = outline.x - 2 * EDGE_WALL;
+  const innerD = outline.y - 2 * EDGE_WALL;
+  const holePts = mountingHoles(span);
+  const holes = holePts.map(([x, y]) => ({ x, y, thru: screw.thru, cbDia: screw.cbDia, cbDepth: CB_DEPTH }));
+  const keepoutR = screw.cbDia / 2 + wall;
+  const lattice = latticeFrame(holePts);
+  const parts = items.map(({ part, quantity }) => {
+    const pocket = { w: round3(part.x + 2 * clearance), d: round3(part.y + 2 * clearance) };
+    return {
+      part, quantity, floorZ: round3(VISION_Z - part.z), pocket,
+      pitch: { x: round3(pocket.w + wall), y: round3(pocket.d + wall) },
+    };
+  });
+  const grids = [];
+  let totalH = 0, maxW = 0;
+  if (errors.length === 0) {
+    for (const [index, item] of parts.entries()) {
+      const maxCols = Math.floor((innerW + wall) / item.pitch.x + 1e-9);
+      if (maxCols < 1) {
+        errors.push(`Part ${item.part.name} is too wide to fit in this tray.`);
+        continue;
+      }
+      const cols = Math.min(item.quantity, maxCols);
+      const rows = Math.ceil(item.quantity / cols);
+      const width = item.pocket.w + (cols - 1) * item.pitch.x;
+      const height = item.pocket.d + (rows - 1) * item.pitch.y;
+      grids.push({ index, cols, rows, width, height });
+      maxW = Math.max(maxW, width);
+      totalH += height;
+    }
+    totalH += Math.max(0, grids.length - 1) * wall;
+    if (totalH > innerD + 1e-6) {
+      errors.push('The requested package counts do not fit in the tray. Increase the tray width or reduce the counts.');
+    }
+    if (maxW > innerW + 1e-6) {
+      errors.push('The requested package layout is wider than the tray. Increase the tray width.');
+    }
+  }
+
+  const pockets = [];
+  if (errors.length === 0) {
+    const xLimit = Math.max(0, (innerW - maxW) / 2);
+    const yLimit = Math.max(0, (innerD - totalH) / 2);
+    const offsets = (limit) => {
+      const values = [0];
+      for (let n = 0.5; n <= limit; n += 0.5) values.push(n, -n);
+      if (Math.abs(limit * 2 - Math.round(limit * 2)) > 1e-6) values.push(limit, -limit);
+      return values.filter(v => Math.abs(v) <= limit + 1e-6).sort((a, b) => Math.abs(a) - Math.abs(b));
+    };
+    let chosen = null;
+    for (const yShift of offsets(yLimit)) {
+      for (const xShift of offsets(xLimit)) {
+        let cursorTop = totalH / 2 + yShift;
+        let clear = true;
+        const placed = [];
+        for (const grid of grids) {
+          const item = parts[grid.index];
+          for (let row = 0; row < grid.rows && clear; row++) {
+            const count = Math.min(grid.cols, item.quantity - row * grid.cols);
+            const cy = cursorTop - item.pocket.d / 2 - row * item.pitch.y;
+            const rowWidth = item.pocket.w + (count - 1) * item.pitch.x;
+            const x0 = xShift - rowWidth / 2;
+            for (let col = 0; col < count; col++) {
+              const cx = x0 + item.pocket.w / 2 + col * item.pitch.x;
+              if (holes.some(h => rectHitsCircle(cx, cy, item.pocket.w, item.pocket.d, h.x, h.y, keepoutR))) {
+                clear = false;
+                break;
+              }
+              placed.push({
+                cx: round3(cx), cy: round3(cy), w: item.pocket.w, d: item.pocket.d,
+                floorZ: item.floorZ, part: grid.index, col, row,
+              });
+            }
+          }
+          cursorTop -= grid.height + wall;
+        }
+        if (clear) { chosen = placed; break; }
+      }
+      if (chosen) break;
+    }
+    if (chosen) pockets.push(...chosen);
+    else errors.push('The requested package layout conflicts with the mounting-hole keepouts. Change the tray width or package counts.');
+  }
+
+  const outlinePoly = filletPolygon(outlinePolygon(outline, PIN1_CHAMFER), CORNER_FILLET);
+  const a0 = shoelace(outlinePoly);
+  const a1 = shoelace(offsetPolygon(outlinePoly, TOP_CHAMFER / 2));
+  const a2 = shoelace(offsetPolygon(outlinePoly, TOP_CHAMFER));
+  const ring = (TOP_CHAMFER / 6) * (a0 + 4 * a1 + a2);
+  const slab = a0 * (TRAY_H - TOP_CHAMFER) + ring;
+  const pocketVol = pockets.reduce((a, p) => a + p.w * p.d * (TRAY_H - p.floorZ), 0);
+  const holeVol = holes.reduce((a, h) => a + Math.PI * (h.thru / 2) ** 2 * (TRAY_H - h.cbDepth) + Math.PI * (h.cbDia / 2) ** 2 * h.cbDepth, 0);
+  return {
+    ok: errors.length === 0, errors, warnings, input, outline, trayH: TRAY_H,
+    latticeOrigin: { x: lattice.x, y: lattice.y }, latticeParity: lattice.parity,
+    floorZ: parts[0]?.floorZ ?? 0, pocket: parts[0]?.pocket ?? null, pitch: parts[0]?.pitch ?? null,
+    parts, grids, pockets, holes, screw, keepoutR, chamfer: PIN1_CHAMFER,
+    stats: {
+      pocketCount: pockets.length, pocketCounts: parts.map(item => item.quantity),
+      volumeEstimateCm3: round3((slab - pocketVol - holeVol) / 1000),
+    },
+  };
+}
+
 // Axis-aligned rect (center cx,cy; size w,d) vs circle (hx,hy,r) intersection test.
 // Tolerant at exact tangency (dist == r): a pocket edge exactly `wall` away from
 // a counterbore edge is by design a keepout hit-free tangency, and float noise
@@ -63,6 +194,7 @@ function rectHitsCircle(cx, cy, w, d, hx, hy, r) {
 }
 
 export function computePlan(raw) {
+  if (Array.isArray(raw.parts)) return computeMultiPartPlan(raw);
   const errors = [], warnings = [];
 
   const screwKey = raw.screw === 'M3' ? 'M3' : 'M4';
@@ -382,8 +514,8 @@ export function buildTray(mod, plan) {
 
   const cutters = [];
 
-  // 2. Pockets: one extruded cross-section per distinct floor depth (two-part
-  //    trays have two floors), each from its floorZ up through the top (+1).
+  // 2. Pockets: one extruded cross-section per distinct floor depth, each from
+  //    its floorZ up through the top (+1).
   const byFloor = new Map();
   for (const p of plan.pockets) {
     if (!byFloor.has(p.floorZ)) byFloor.set(p.floorZ, []);
